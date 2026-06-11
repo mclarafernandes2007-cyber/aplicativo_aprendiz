@@ -680,21 +680,18 @@ elif st.session_state.aba_ativa == "jogo":
             st.markdown(f'<div class="{tc}">⏱️ {mins:02d}:{secs:02d}</div>', unsafe_allow_html=True)
 
             # ── QUADRO DE EMOJIS ──
-            # Espectadores: key muda a cada rerun para forçar re-render com emojis atualizados.
-            # Desenhista: key estável para não perder o estado de edição durante a rodada.
-            if eh_desenhista:
-                canvas_key = f"canvas_des_r{gs['rodada_atual']}"
-            else:
-                # inclui hash dos emojis para só recriar quando o quadro mudar de fato
-                emojis_hash = hash(json.dumps(gs["emojis_quadro"], sort_keys=True))
-                canvas_key = f"canvas_esp_r{gs['rodada_atual']}_{emojis_hash}"
+            # Para espectadores: o hash dos emojis é embutido como comentário no HTML.
+            # Quando o quadro muda, o HTML muda → Streamlit recria o iframe automaticamente.
             canvas_html = build_canvas_html(
                 emojis_atuais=gs["emojis_quadro"],
                 pode_editar=eh_desenhista and not gs["rodada_encerrada"],
                 paleta=PALETA_EMOJIS,
             )
+            if not eh_desenhista:
+                emojis_hash = hash(json.dumps(gs["emojis_quadro"], sort_keys=True))
+                canvas_html = f"<!-- h:{emojis_hash} -->\n" + canvas_html
             altura_canvas = 620 if (eh_desenhista and not gs["rodada_encerrada"]) else 380
-            resultado = components.html(canvas_html, height=altura_canvas, scrolling=False, key=canvas_key)
+            resultado = components.html(canvas_html, height=altura_canvas, scrolling=False)
 
             # Salva alterações do desenhista no estado global
             if eh_desenhista and resultado is not None:

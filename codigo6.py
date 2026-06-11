@@ -2,20 +2,16 @@
 DocGartic - Jogo multiplayer estilo Gartic para Documentos Técnicos e Administrativos
 ======================================================================================
 MECÂNICA ATUALIZADA:
-- fase_preparacao (30s): desenhista monta o quadro de emojis antes da rodada começar
-  • pode digitar emojis livremente no campo de texto OU clicar na paleta
-  • clica "Confirmar e iniciar rodada" (ou tempo esgota) → emojis salvos, rodada começa
+- fase_preparacao (30s): desenhista monta o quadro de emojis antes da rodada começar colando/digitando
 - Durante a rodada: quadro estático para todos (inclusive gerenciador)
 - Gerenciador: vê todas as respostas possíveis ANTES de encerrar; só exibe a correta APÓS encerrar
 """
 
 import streamlit as st
-import streamlit.components.v1 as components
 import time
 import unicodedata
 import threading
 import random
-import json
 from datetime import datetime
 
 # ─────────────────────────────────────────────
@@ -32,15 +28,14 @@ def get_global_state():
         "desenhista_sid": None,
         "acertaram": [],
         "chat": [],
-        "emojis_quadro": [],        # [{emoji, x, y, id}]
+        "emojis_quadro": "",        # Alterado para string (recebe o input direto)
         "jogo_iniciado": False,
         "rodada_encerrada": False,
         "hora_inicio_rodada": None,
         "duracao_rodada": 120,
-        # Novos campos para fase de preparação
-        "fase_preparacao": False,   # True durante os 30s de montagem do quadro
-        "hora_inicio_prep": None,   # timestamp do início da preparação
-        "duracao_prep": 30,         # segundos de preparação
+        "fase_preparacao": False,   
+        "hora_inicio_prep": None,   
+        "duracao_prep": 30,         
     }
 
 @st.cache_resource
@@ -55,77 +50,63 @@ MANAGER_PASSWORD = "admin123"
 
 DOCUMENTOS = {
     "Ata": {
-        "descricao": "Documento que registra formalmente as ocorrências, deliberações e decisões tomadas em reuniões, assembleias ou sessões. Deve ser redigida em linguagem clara, com verbos no pretérito perfeito, e assinada pelos presentes.",
+        "descricao": "Documento que registra formalmente as ocorrências, deliberações e decisões tomadas em reuniões...",
         "dicas": ["Registra decisões de reuniões","Não pode ter rasuras","Verbos no pretérito perfeito","Assinada por secretário e presidente"],
     },
     "Memorando": {
-        "descricao": "Correspondência interna de uso rotineiro entre setores ou departamentos de uma mesma organização. Caracteriza-se pela linguagem objetiva e identificação do remetente pelo cargo.",
+        "descricao": "Correspondência interna de uso rotineiro entre setores ou departamentos de uma mesma organização...",
         "dicas": ["Comunicação interna entre setores","Linguagem objetiva e direta","Identifica remetente pelo cargo","Muito usado em órgãos públicos"],
     },
     "E-mail corporativo": {
-        "descricao": "Mensagem eletrônica formal utilizada no ambiente profissional. Deve conter assunto claro, saudação, corpo do texto objetivo, assinatura com dados do remetente, e respeitar normas de etiqueta digital.",
+        "descricao": "Mensagem eletrônica formal utilizada no ambiente profissional...",
         "dicas": ["Comunicação eletrônica formal","Deve ter assunto, saudação e assinatura","Evita gírias e abreviações","Pode incluir CC e CCO"],
     },
     "Recibo": {
-        "descricao": "Documento que comprova o recebimento de dinheiro, bens ou serviços. Deve conter o valor por extenso, a data, a identificação de quem recebe e de quem paga, e ter validade jurídica.",
+        "descricao": "Documento que comprova o recebimento de dinheiro, bens ou serviços...",
         "dicas": ["Comprova recebimento de dinheiro ou bens","Deve conter valor por extenso e data","Tem validade jurídica","Assinado por quem RECEBE"],
     },
     "Ofício": {
-        "descricao": "Documento de comunicação oficial utilizado entre órgãos públicos ou entre estes e entidades privadas. Segue rigoroso padrão formal com numeração sequencial anual, vocativo e fecho padronizado.",
+        "descricao": "Documento de comunicação oficial utilizado entre órgãos públicos ou entidades privadas...",
         "dicas": ["Comunicação oficial entre órgãos públicos","Numeração sequencial por ano","Segue padrão oficial com vocativo e fecho","Usado para comunicação EXTERNA"],
     },
     "Relatório Técnico": {
-        "descricao": "Documento elaborado por profissional habilitado que descreve, analisa e apresenta conclusões sobre uma atividade, pesquisa ou inspeção. Estrutura-se em introdução, desenvolvimento e conclusão, podendo conter tabelas e referências.",
+        "descricao": "Documento elaborado por profissional habilitado que descreve, analisa e apresenta conclusões...",
         "dicas": ["Descreve atividade ou pesquisa realizada","Estrutura: introdução, desenvolvimento, conclusão","Pode ter tabelas e referências","Emitido por profissional habilitado"],
     },
     "Procuração": {
-        "descricao": "Instrumento pelo qual uma pessoa (outorgante) concede poderes a outra (outorgado) para agir em seu nome em atos jurídicos específicos. Pode ser pública (lavrada em cartório) ou particular, com prazo determinado ou indeterminado.",
+        "descricao": "Instrumento pelo qual uma pessoa concede poderes a outra para agir em seu nome...",
         "dicas": ["Concede poderes de representação","Pode ser pública (cartório) ou particular","Especifica atos autorizados","Pode ter prazo ou ser indeterminada"],
     },
     "Contrato": {
-        "descricao": "Acordo de vontades entre duas ou mais partes que cria, modifica ou extingue direitos e obrigações. Requer agente capaz, objeto lícito e forma prescrita em lei. Deve ser assinado pelas partes e por testemunhas.",
+        "descricao": "Acordo de vontades entre duas ou mais partes que cria, modifica ou extingue direitos...",
         "dicas": ["Acordo de vontades entre partes","Precisa de agente capaz e objeto lícito","Cláusulas de obrigações e penalidades","Assinado por ambas as partes e testemunhas"],
     },
     "Declaração": {
-        "descricao": "Documento em que uma pessoa afirma ou confirma determinado fato, situação ou condição. Usa a fórmula 'Declaro para os devidos fins' e pode ser de residência, renda, estado civil, entre outros. Pode exigir reconhecimento de firma.",
+        "descricao": "Documento em que uma pessoa afirma ou confirma determinado fato, situação ou condição...",
         "dicas": ["Afirma ou confirma um fato","Usa fórmula: Declaro para os devidos fins","Pode ser de residência ou renda","Pode exigir reconhecimento de firma"],
     },
     "Requerimento": {
-        "descricao": "Pedido formal dirigido a uma autoridade ou órgão público solicitando alguma providência, direito ou serviço. Estrutura-se em identificação do requerente, exposição dos fatos e pedido, encerrando com 'Nestes termos, pede deferimento'.",
+        "descricao": "Pedido formal dirigido a uma autoridade ou órgão público solicitando providência...",
         "dicas": ["Pedido formal a uma autoridade","Estrutura: identificação, fatos e pedido","Termina com: Nestes termos, pede deferimento","Usado em processos administrativos"],
     },
     "Circular": {
-        "descricao": "Comunicação interna ou externa enviada simultaneamente a múltiplos destinatários, contendo o mesmo conteúdo para todos. Usada para transmitir normas, informações coletivas ou comunicar mudanças de política.",
+        "descricao": "Comunicação interna ou externa enviada simultaneamente a múltiplos destinatários...",
         "dicas": ["Enviada a múltiplos destinatários","Conteúdo idêntico para todos","Transmite normas ou informações coletivas","Comum para comunicar mudanças de política"],
     },
     "Edital": {
-        "descricao": "Ato público oficial que convoca interessados ou dá ciência a todos sobre determinado fato, condição ou procedimento. Amplamente utilizado em concursos públicos e licitações, deve ser publicado em veículo de ampla divulgação e definir regras e critérios claros.",
+        "descricao": "Ato público oficial que convoca interessados ou dá ciência a todos sobre determinado fato...",
         "dicas": ["Ato público que convoca interessados","Usado em concursos e licitações","Publicado em veículo de ampla divulgação","Define regras e critérios de seleção"],
     },
 }
 
 TOTAL_RODADAS = 12
 
-PALETA_EMOJIS = [
-    "📝","📄","📃","📋","📊","📈","📉","🗂️","🗃️","📁","📂","🗄️","📰","📓","📒","📔","📕","📗","📘","📙","📚","📖",
-    "✉️","📧","📨","📩","📬","📭","📯","📢","📣","💬","🗣️","📞","☎️","📠","📟",
-    "👤","👥","🤝","👔","👩‍💼","👨‍💼","🏛️","🏢","🏦","🏫","🧑‍⚖️","👮","🕵️","👷","🧑‍💻","🧑‍🔬",
-    "⚖️","🔏","🔐","🔑","🗝️","🖊️","✍️","📜","📑","🖋️","🔖","🪪","📛","🎫","🎟️",
-    "⏰","⌛","⏳","📅","📆","🗓️","⏱️","🔔","🔕","⌚",
-    "💰","💵","💴","💶","💷","💳","🧾","💸","💹","🏧","🪙","📤","📥",
-    "✅","❌","⚠️","ℹ️","🚨","🔴","🟡","🟢","🔵","🟣","🟠","⭕","❓","❗","🆗","🆕","🆙","🔰","♻️",
-    "🔬","🔭","⚙️","🔧","🛠️","📐","📏","💡","🖥️","💻","🖨️","⌨️","🖱️","📡","🔌","🔋","💾","💿","📀",
-    "🎯","🏆","🥇","🥈","🥉","🌐","🔗","📌","📍","🚩","🏁","🎖️","🏅","🌟","⭐","✨",
-    "🔺","🔻","🔷","🔶","🔹","🔸","▶️","◀️","⬆️","⬇️","↗️","↘️","🔄","➡️","⬅️","🔁",
-    "🌍","🌎","🌏","🏔️","🌊","🌱","🌿","🍃","🔥","💧","🌈","☀️","🌙","⚡",
-]
-
 # ─────────────────────────────────────────────
 # UTILITÁRIOS
 # ─────────────────────────────────────────────
 
 def normalizar(t):
-    nfkd = unicodedata.normalize("NFKD", t)
+    nfkd = unicodedata.normalize("NFKD", str(t))
     return "".join(c for c in nfkd if not unicodedata.combining(c)).lower().strip()
 
 def documento_da_rodada(gs):
@@ -159,25 +140,22 @@ def escolher_desenhista(gs):
     return jogadores[(gs["rodada_atual"] - 1) % len(jogadores)]
 
 def iniciar_fase_preparacao(gs):
-    """Inicia os 30s de preparação do desenhista antes da rodada de palpites."""
     gs["fase_preparacao"] = True
     gs["hora_inicio_prep"] = time.time()
-    gs["emojis_quadro"] = []
+    gs["emojis_quadro"] = ""
     gs["rodada_encerrada"] = False
     gs["acertaram"] = []
     gs["dicas_liberadas"] = 0
     gs["hora_inicio_rodada"] = None
     nome_des = gs["jogadores"].get(gs["desenhista_sid"], {}).get("nome", "?")
-    add_chat(gs, "🎨 Sistema", f"⏳ {nome_des} tem 30s para montar o quadro de emojis!", "sistema")
+    add_chat(gs, "🎨 Sistema", f"⏳ {nome_des} tem {gs['duracao_prep']}s para montar o quadro de emojis!", "sistema")
 
 def iniciar_fase_palpites(gs, emojis_finais):
-    """Encerra a preparação e abre a rodada de palpites com o quadro congelado."""
     gs["fase_preparacao"] = False
     gs["hora_inicio_prep"] = None
     gs["emojis_quadro"] = emojis_finais
     gs["hora_inicio_rodada"] = time.time()
     gs["dicas_liberadas"] = 1
-    nome_des = gs["jogadores"].get(gs["desenhista_sid"], {}).get("nome", "?")
     add_chat(gs, "🎮 Sistema", f"🚀 Rodada {gs['rodada_atual']}/{TOTAL_RODADAS} começou! Adivinhe o documento! 🔍", "sistema")
 
 def avancar_rodada(gs):
@@ -186,7 +164,7 @@ def avancar_rodada(gs):
     gs["acertaram"] = []
     gs["rodada_encerrada"] = False
     gs["hora_inicio_rodada"] = None
-    gs["emojis_quadro"] = []
+    gs["emojis_quadro"] = ""
     gs["fase_preparacao"] = False
     gs["hora_inicio_prep"] = None
     if gs["rodada_atual"] > TOTAL_RODADAS:
@@ -203,7 +181,7 @@ def iniciar_jogo(gs):
     gs["rodada_atual"] = 0
     gs["chat"] = []
     gs["acertaram"] = []
-    gs["emojis_quadro"] = []
+    gs["emojis_quadro"] = ""
     gs["rodada_encerrada"] = False
     gs["fase_preparacao"] = False
     gs["hora_inicio_prep"] = None
@@ -215,48 +193,25 @@ def iniciar_jogo(gs):
     avancar_rodada(gs)
 
 # ─────────────────────────────────────────────
-# PÁGINA
+# PÁGINA E CSS
 # ─────────────────────────────────────────────
 
 st.set_page_config(page_title="DocGartic 📝", page_icon="📝", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
 <style>
-.dica-card{background:linear-gradient(135deg,#1e2a3a,#253347);border-left:4px solid #4e9af1;
-  border-radius:8px;padding:10px 14px;margin:5px 0;color:#e0e6f0;font-size:1rem}
-.timer-box{background:#1e2a3a;border-radius:10px;padding:8px 18px;text-align:center;
-  font-size:1.7rem;font-weight:bold;color:#4e9af1;border:2px solid #2d4a6a;margin-bottom:10px}
-.timer-box.urgente{color:#e74c3c;border-color:#6a2d2d}
-.timer-prep{background:linear-gradient(135deg,#1a2a1a,#1e3a1a);border-radius:10px;padding:8px 18px;
-  text-align:center;font-size:1.7rem;font-weight:bold;color:#2ecc71;border:2px solid #2d6a2d;margin-bottom:10px}
-.timer-prep.urgente{color:#f39c12;border-color:#6a4a00}
-.chat-msg-acerto{background:linear-gradient(90deg,#1a3a1a,#1e4a1e);border-left:4px solid #2ecc71;
-  border-radius:6px;padding:7px 11px;margin:3px 0;color:#a8f0c0;font-weight:bold}
-.chat-msg-sistema{background:#1a1a2e;border-left:4px solid #9b59b6;border-radius:6px;
-  padding:7px 11px;margin:3px 0;color:#c9a0f0;font-style:italic}
+.dica-card{background:linear-gradient(135deg,#1e2a3a,#253347);border-left:4px solid #4e9af1;border-radius:8px;padding:10px 14px;margin:5px 0;color:#e0e6f0;font-size:1rem}
+.timer-box{background:#1e2a3a;border-radius:10px;padding:8px 18px;text-align:center;font-size:1.7rem;font-weight:bold;color:#4e9af1;border:2px solid #2d4a6a;margin-bottom:10px}
+.timer-prep{background:linear-gradient(135deg,#1a2a1a,#1e3a1a);border-radius:10px;padding:8px 18px;text-align:center;font-size:1.7rem;font-weight:bold;color:#2ecc71;border:2px solid #2d6a2d;margin-bottom:10px}
+.chat-msg-acerto{background:linear-gradient(90deg,#1a3a1a,#1e4a1e);border-left:4px solid #2ecc71;border-radius:6px;padding:7px 11px;margin:3px 0;color:#a8f0c0;font-weight:bold}
+.chat-msg-sistema{background:#1a1a2e;border-left:4px solid #9b59b6;border-radius:6px;padding:7px 11px;margin:3px 0;color:#c9a0f0;font-style:italic}
 .chat-msg-normal{background:#16213e;border-radius:6px;padding:7px 11px;margin:3px 0;color:#cdd6e8}
-.rank-item{display:flex;justify-content:space-between;background:#1a2332;border-radius:6px;
-  padding:7px 11px;margin:3px 0;color:#cdd6e8}
-.rodada-badge{background:linear-gradient(135deg,#2d5a8e,#1a3a6e);border-radius:20px;
-  padding:5px 18px;display:inline-block;color:#a0c4f8;font-size:.9rem;font-weight:bold;margin-bottom:8px}
-.des-tag{background:#2d1a4e;border-radius:8px;padding:8px 14px;color:#c9a0f0;font-weight:bold;
-  margin-bottom:10px;border-left:4px solid #9b59b6}
-.prep-tag{background:linear-gradient(135deg,#1a3a1a,#1e4a1a);border-radius:8px;padding:10px 16px;
-  color:#a8f0c0;font-weight:bold;margin-bottom:10px;border-left:4px solid #2ecc71;font-size:1.05rem}
-.watch-tag{background:#1a2d4e;border-radius:8px;padding:8px 14px;color:#a0c4f8;
-  margin-bottom:10px;border-left:4px solid #4e9af1}
-.watch-prep-tag{background:linear-gradient(135deg,#2a2a0a,#3a3a0a);border-radius:8px;padding:10px 16px;
-  color:#f8e07a;font-weight:bold;margin-bottom:10px;border-left:4px solid #f39c12;font-size:1rem}
-.doc-grid{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}
-.doc-chip{background:#1a2d1a;border:1px solid #2d6a2d;border-radius:20px;
-  padding:5px 14px;color:#a8f0c0;font-size:0.9rem;cursor:default}
-.doc-chip-correct{background:linear-gradient(135deg,#1a3a1a,#1e5a1e);border:2px solid #2ecc71;
-  border-radius:20px;padding:5px 14px;color:#ffffff;font-size:0.95rem;font-weight:bold}
+.rank-item{display:flex;justify-content:space-between;background:#1a2332;border-radius:6px;padding:7px 11px;margin:3px 0;color:#cdd6e8}
 </style>
 """, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────
-# SESSÃO LOCAL
+# SESSÃO LOCAL E MANUTENÇÃO GLOBAL
 # ─────────────────────────────────────────────
 
 if "session_id" not in st.session_state:
@@ -269,28 +224,22 @@ if "gerenciador_logado" not in st.session_state:
     st.session_state.gerenciador_logado = False
 if "aba_ativa" not in st.session_state:
     st.session_state.aba_ativa = "jogo"
-if "emojis_prep_local" not in st.session_state:
-    st.session_state.emojis_prep_local = []  # buffer local do desenhista durante preparação
 
 gs   = get_global_state()
 lock = get_lock()
 sid  = st.session_state.session_id
-
-# ─────────────────────────────────────────────
-# MANUTENÇÃO GLOBAL
-# ─────────────────────────────────────────────
 
 with lock:
     if st.session_state.ja_no_jogo:
         ping(gs, sid)
 
     if gs["jogo_iniciado"]:
-        # ── Fase de preparação: encerrar se o tempo esgotou ──
+        # Fase de preparação: encerrar se o tempo esgotou sem o desenhista confirmar
         if gs["fase_preparacao"] and gs["hora_inicio_prep"]:
             if tempo_restante_prep(gs) == 0:
-                iniciar_fase_palpites(gs, gs.get("emojis_quadro", []))
+                iniciar_fase_palpites(gs, gs.get("emojis_quadro", "🤷‍♀️ Tempo esgotado!"))
 
-        # ── Fase de palpites: controle de tempo e dicas ──
+        # Fase de palpites: controle de tempo e dicas
         if not gs["fase_preparacao"] and not gs["rodada_encerrada"] and gs["hora_inicio_rodada"]:
             if tempo_restante(gs) == 0:
                 gs["rodada_encerrada"] = True
@@ -299,255 +248,9 @@ with lock:
                     add_chat(gs, "⏰ Sistema", f"Tempo esgotado! O documento era: **{doc}**", "sistema")
             else:
                 elapsed = time.time() - gs["hora_inicio_rodada"]
-                devidas = min(4, 1 + int(elapsed // 25))
+                devidas = min(4, 1 + int(elapsed // (gs["duracao_rodada"] / 4)))
                 if devidas > gs["dicas_liberadas"]:
                     gs["dicas_liberadas"] = devidas
-
-# ─────────────────────────────────────────────
-# CANVAS HTML — preparação (editável) e visualização (estático)
-# ─────────────────────────────────────────────
-
-def build_canvas_prep_html(paleta):
-    """Canvas editável para o desenhista na fase de preparação — com campo de texto livre."""
-    paleta_json = json.dumps(paleta, ensure_ascii=False)
-    return f"""
-<div style="font-family:sans-serif">
-
-<!-- Quadro branco -->
-<div id="board-wrap" style="position:relative;width:100%;padding-bottom:52%;
-  border:2px solid #2ecc71;border-radius:12px;background:#f9f9f9;overflow:hidden;cursor:crosshair">
-  <div id="board" style="position:absolute;inset:0"></div>
-  <div id="empty-hint" style="position:absolute;inset:0;display:flex;align-items:center;
-    justify-content:center;pointer-events:none;color:#bbb;font-size:0.95rem">
-    Selecione um emoji abaixo e clique no quadro para posicionar
-  </div>
-</div>
-
-<!-- Campo de texto livre para colar/digitar emojis -->
-<div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-  <input id="emoji-input" type="text" placeholder="✏️ Cole ou digite emojis aqui e pressione Enter ou Adicionar"
-    style="flex:1;padding:7px 12px;border-radius:8px;border:1px solid #444;background:#1a1a2e;
-    color:#fff;font-size:1.3rem;min-width:180px" />
-  <button onclick="addFromInput()" style="padding:7px 16px;border-radius:8px;border:1px solid #2ecc71;
-    background:#1a3a1a;color:#a8f0c0;cursor:pointer;font-size:0.9rem;white-space:nowrap">➕ Adicionar</button>
-</div>
-<div style="color:#888;font-size:0.78rem;margin-top:3px;margin-left:2px">
-  Dica: você pode colar vários emojis de uma vez — cada um será adicionado separadamente ao centro do quadro.
-</div>
-
-<!-- Paleta clicável -->
-<div style="margin-top:10px">
-  <div style="color:#aaa;font-size:0.82rem;margin-bottom:5px">
-    Ou clique na paleta → clique no quadro para posicionar &nbsp;|&nbsp; Arraste para mover &nbsp;|&nbsp; Duplo clique para remover
-  </div>
-  <div id="palette" style="display:flex;flex-wrap:wrap;gap:4px;max-height:120px;overflow-y:auto;
-    background:#111;padding:8px;border-radius:10px;border:1px solid #333"></div>
-</div>
-
-<!-- Controles -->
-<div style="margin-top:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-  <button onclick="clearBoard()" style="padding:6px 16px;border-radius:6px;border:1px solid #555;
-    background:#1a1a1a;color:#e0e0e0;cursor:pointer;font-size:0.9rem">🗑️ Limpar tudo</button>
-  <span id="sel-info" style="color:#aaa;font-size:0.82rem">Nenhum emoji selecionado da paleta</span>
-</div>
-
-<script>
-const PALETA = {paleta_json};
-let emojis   = [];
-let selected = null;
-let dragEl = null, dragId = null, offX = 0, offY = 0;
-let nextId = 1;
-
-const board = document.getElementById('board');
-const wrap  = document.getElementById('board-wrap');
-const hint  = document.getElementById('empty-hint');
-const selInfo = document.getElementById('sel-info');
-
-function updateHint() {{ hint.style.display = emojis.length ? 'none' : 'flex'; }}
-
-function sendState() {{
-  window.parent.postMessage({{type:'streamlit:setComponentValue', value: JSON.stringify(emojis)}}, '*');
-}}
-
-function getEmojiSegments(str) {{
-  // Divide a string em segmentos de emoji (usando Intl.Segmenter se disponível)
-  if (typeof Intl !== 'undefined' && Intl.Segmenter) {{
-    const seg = new Intl.Segmenter([], {{granularity: 'grapheme'}});
-    return [...seg.segment(str)].map(s => s.segment).filter(s => s.trim().length > 0);
-  }}
-  // Fallback: split por codepoint
-  return [...str].filter(c => c.trim().length > 0);
-}}
-
-function addEmoji(emoji, cx_pct, cy_pct) {{
-  const id = nextId++;
-  const x = cx_pct !== undefined ? cx_pct : (30 + Math.random() * 40);
-  const y = cy_pct !== undefined ? cy_pct : (20 + Math.random() * 60);
-  emojis.push({{emoji, x: +x.toFixed(1), y: +y.toFixed(1), id}});
-  renderAll();
-  sendState();
-}}
-
-function addFromInput() {{
-  const input = document.getElementById('emoji-input');
-  const val = input.value.trim();
-  if (!val) return;
-  const segments = getEmojiSegments(val);
-  segments.forEach((em, i) => {{
-    const x = 20 + (i % 8) * 9;
-    const y = 30 + Math.floor(i / 8) * 20;
-    addEmoji(em, x, y);
-  }});
-  input.value = '';
-}}
-
-document.getElementById('emoji-input').addEventListener('keydown', function(e) {{
-  if (e.key === 'Enter') addFromInput();
-}});
-
-function makeEl(item) {{
-  const el = document.createElement('div');
-  el.dataset.id = item.id;
-  el.textContent = item.emoji;
-  el.style.cssText = `position:absolute;left:${{item.x}}%;top:${{item.y}}%;
-    transform:translate(-50%,-50%);font-size:2.4rem;line-height:1;
-    user-select:none;cursor:grab;z-index:10;
-    filter:drop-shadow(0 1px 3px rgba(0,0,0,.25));transition:filter .1s`;
-  el.addEventListener('mousedown',  onDragStart);
-  el.addEventListener('touchstart', onTouchStart, {{passive:false}});
-  el.addEventListener('dblclick', () => {{ removeEmoji(item.id); }});
-  el.title = 'Arraste para mover · Duplo clique para remover';
-  return el;
-}}
-
-function renderAll() {{
-  board.querySelectorAll('[data-id]').forEach(e => e.remove());
-  emojis.forEach(item => board.appendChild(makeEl(item)));
-  updateHint();
-}}
-
-/* Clicar no quadro para posicionar emoji selecionado da paleta */
-wrap.addEventListener('click', function(e) {{
-  if (!selected) return;
-  if (e.target !== wrap && e.target !== board && !e.target.id === 'board') return;
-  const r = wrap.getBoundingClientRect();
-  const x = +((e.clientX - r.left) / r.width  * 100).toFixed(1);
-  const y = +((e.clientY - r.top)  / r.height * 100).toFixed(1);
-  addEmoji(selected, x, y);
-}});
-
-/* Drag */
-function onDragStart(e) {{
-  e.stopPropagation();
-  dragEl = e.currentTarget;
-  dragId = +dragEl.dataset.id;
-  dragEl.style.cursor = 'grabbing';
-  dragEl.style.zIndex = '999';
-  const r = wrap.getBoundingClientRect();
-  const item = emojis.find(i => i.id === dragId);
-  offX = e.clientX - r.left - (item.x / 100) * r.width;
-  offY = e.clientY - r.top  - (item.y / 100) * r.height;
-}}
-function onTouchStart(e) {{
-  e.preventDefault();
-  const t = e.touches[0];
-  const fake = {{stopPropagation:()=>{{}}, currentTarget:e.currentTarget, clientX:t.clientX, clientY:t.clientY}};
-  onDragStart(fake);
-}}
-function onMove(cx, cy) {{
-  if (!dragEl) return;
-  const r = wrap.getBoundingClientRect();
-  const x = Math.min(97, Math.max(3, (cx - r.left - offX) / r.width  * 100));
-  const y = Math.min(93, Math.max(7, (cy - r.top  - offY) / r.height * 100));
-  dragEl.style.left = x + '%';
-  dragEl.style.top  = y + '%';
-}}
-document.addEventListener('mousemove', e => onMove(e.clientX, e.clientY));
-document.addEventListener('touchmove', e => onMove(e.touches[0].clientX, e.touches[0].clientY), {{passive:false}});
-function onEnd() {{
-  if (!dragEl) return;
-  const item = emojis.find(i => i.id === dragId);
-  if (item) {{ item.x = parseFloat(dragEl.style.left); item.y = parseFloat(dragEl.style.top); }}
-  dragEl.style.cursor = 'grab';
-  dragEl.style.zIndex = '10';
-  dragEl = null; dragId = null;
-  sendState();
-}}
-document.addEventListener('mouseup',  onEnd);
-document.addEventListener('touchend', onEnd);
-
-function removeEmoji(id) {{
-  emojis = emojis.filter(i => i.id !== id);
-  renderAll();
-  sendState();
-}}
-
-function clearBoard() {{
-  emojis = [];
-  selected = null;
-  if (selInfo) selInfo.textContent = 'Nenhum emoji selecionado da paleta';
-  document.querySelectorAll('.pal-btn').forEach(b => b.style.outline = 'none');
-  renderAll();
-  sendState();
-}}
-
-/* Paleta */
-const palette = document.getElementById('palette');
-PALETA.forEach(em => {{
-  const btn = document.createElement('button');
-  btn.className = 'pal-btn';
-  btn.textContent = em;
-  btn.title = 'Clique para selecionar';
-  btn.style.cssText = 'font-size:1.5rem;padding:2px 5px;border-radius:6px;border:1px solid #555;background:#1e1e1e;cursor:pointer;transition:outline .1s';
-  btn.addEventListener('click', () => {{
-    selected = (selected === em) ? null : em;
-    document.querySelectorAll('.pal-btn').forEach(b => b.style.outline = 'none');
-    if (selected) {{
-      btn.style.outline = '2px solid #2ecc71';
-      if (selInfo) selInfo.textContent = 'Selecionado: ' + selected + ' — clique no quadro para posicionar';
-    }} else {{
-      if (selInfo) selInfo.textContent = 'Nenhum emoji selecionado da paleta';
-    }}
-  }});
-  palette.appendChild(btn);
-}});
-
-renderAll();
-</script>
-</div>
-"""
-
-
-def build_canvas_static_html(emojis_atuais):
-    """Canvas somente leitura para espectadores e gerenciador."""
-    emojis_json = json.dumps(emojis_atuais, ensure_ascii=False)
-    return f"""
-<div style="font-family:sans-serif">
-<div id="board-wrap" style="position:relative;width:100%;padding-bottom:52%;
-  border:2px solid #334;border-radius:12px;background:#f8f8f8;overflow:hidden">
-  <div id="board" style="position:absolute;inset:0"></div>
-  <div id="empty-hint" style="position:absolute;inset:0;display:flex;align-items:center;
-    justify-content:center;pointer-events:none;color:#bbb;font-size:1rem">
-    Aguardando emojis do desenhista...
-  </div>
-</div>
-<script>
-const emojis = {emojis_json};
-const board  = document.getElementById('board');
-const hint   = document.getElementById('empty-hint');
-hint.style.display = emojis.length ? 'none' : 'flex';
-emojis.forEach(item => {{
-  const el = document.createElement('div');
-  el.textContent = item.emoji;
-  el.style.cssText = `position:absolute;left:${{item.x}}%;top:${{item.y}}%;
-    transform:translate(-50%,-50%);font-size:2.4rem;line-height:1;
-    user-select:none;pointer-events:none;z-index:10;
-    filter:drop-shadow(0 1px 3px rgba(0,0,0,.25))`;
-  board.appendChild(el);
-}});
-</script>
-</div>
-"""
 
 # ─────────────────────────────────────────────
 # SIDEBAR
@@ -560,13 +263,11 @@ with st.sidebar:
 
     col_a, col_b = st.columns(2)
     with col_a:
-        if st.button("🎮 Jogo", use_container_width=True,
-                     type="primary" if st.session_state.aba_ativa == "jogo" else "secondary"):
+        if st.button("🎮 Jogo", use_container_width=True, type="primary" if st.session_state.aba_ativa == "jogo" else "secondary"):
             st.session_state.aba_ativa = "jogo"
             st.rerun()
     with col_b:
-        if st.button("🛠️ Gerenciar", use_container_width=True,
-                     type="primary" if st.session_state.aba_ativa == "gerenciador" else "secondary"):
+        if st.button("🛠️ Gerenciar", use_container_width=True, type="primary" if st.session_state.aba_ativa == "gerenciador" else "secondary"):
             st.session_state.aba_ativa = "gerenciador"
             st.rerun()
 
@@ -608,9 +309,6 @@ with st.sidebar:
                 st.markdown(f'<div class="rank-item"><span>👤 {d["nome"]}{icon}</span><span>⭐ {d["pontos"]}</span></div>', unsafe_allow_html=True)
         else:
             st.caption("Nenhum jogador ainda.")
-
-        st.divider()
-        st.caption("🔄 Sync a cada 2s")
     else:
         if not st.session_state.gerenciador_logado:
             st.markdown("### 🔐 Acesso Restrito")
@@ -628,8 +326,6 @@ with st.sidebar:
                 st.session_state.gerenciador_logado = False
                 st.session_state.aba_ativa = "jogo"
                 st.rerun()
-            st.divider()
-            st.caption("Os controles do jogo estão na tela principal →")
 
 # ─────────────────────────────────────────────
 # TELA PRINCIPAL
@@ -663,13 +359,12 @@ if st.session_state.aba_ativa == "gerenciador":
             st.metric("Rodada atual", rodada_txt)
 
         st.divider()
-        st.markdown("### 🎛️ Controles")
 
         if not gs["jogo_iniciado"]:
+            st.markdown("### 🎛️ Controles")
             col_c1, col_c2 = st.columns(2)
             with col_c1:
-                if st.button("▶️ Iniciar Jogo", use_container_width=True,
-                             type="primary", disabled=len(gs["jogadores"]) < 1):
+                if st.button("▶️ Iniciar Jogo", use_container_width=True, type="primary", disabled=len(gs["jogadores"]) < 1):
                     with lock:
                         iniciar_jogo(gs)
                     st.rerun()
@@ -679,313 +374,126 @@ if st.session_state.aba_ativa == "gerenciador":
                 st.warning("⚠️ Nenhum jogador na sala ainda.")
         else:
             doc_atual_mgr = documento_da_rodada(gs)
-            if doc_atual_mgr:
-                info_mgr = DOCUMENTOS.get(doc_atual_mgr, {})
-
-                # ── FASE DE PREPARAÇÃO: gerenciador vê timer e quadro sendo montado ──
-                if gs["fase_preparacao"]:
-                    restante_prep_mgr = tempo_restante_prep(gs)
-                    tc_prep = "timer-prep urgente" if restante_prep_mgr <= 10 else "timer-prep"
-                    m_p, s_p = divmod(restante_prep_mgr, 60)
-                    nome_des_mgr = gs["jogadores"].get(gs["desenhista_sid"], {}).get("nome", "?")
-                    st.markdown(
-                        f'<div class="watch-prep-tag">⏳ <b>{nome_des_mgr}</b> está montando o quadro de emojis...</div>',
-                        unsafe_allow_html=True,
-                    )
-                    st.markdown(f'<div class="{tc_prep}">🎨 {m_p:02d}:{s_p:02d}</div>', unsafe_allow_html=True)
-
-                    # Quadro em construção (somente leitura para gerenciador)
-                    st.markdown("**🖼️ Quadro sendo montado:**")
-                    canvas_prep_mgr = build_canvas_static_html(gs["emojis_quadro"])
-                    components.html(canvas_prep_mgr, height=280, scrolling=False)
-
-                    # Botão para pular preparação
-                    if st.button("⏩ Pular preparação agora", use_container_width=True, type="secondary"):
-                        with lock:
-                            iniciar_fase_palpites(gs, gs["emojis_quadro"])
-                        st.rerun()
-
-                    st.divider()
-
-                # ── RODADA DE PALPITES ──
-                # Quadro de emojis (estático)
-                st.markdown("**🎨 Quadro de emojis desta rodada:**")
-                canvas_html_mgr = build_canvas_static_html(gs["emojis_quadro"])
-                components.html(canvas_html_mgr, height=300, scrolling=False)
-
-                st.divider()
-
-                # ── PAINEL DE DOCUMENTOS ──
-                if not gs["rodada_encerrada"]:
-                    # Antes de encerrar: mostra todas as opções possíveis (sem destacar a correta)
-                    st.markdown("### 🗂️ Documentos desta rodada — todas as opções")
-                    st.caption("A resposta correta não está destacada enquanto a rodada está em andamento.")
-                    todos_docs = list(DOCUMENTOS.keys())
-                    chips_html = '<div class="doc-grid">'
-                    for d in sorted(todos_docs):
-                        chips_html += f'<div class="doc-chip">📄 {d}</div>'
-                    chips_html += '</div>'
-                    st.markdown(chips_html, unsafe_allow_html=True)
-                else:
-                    # Após encerrar: destaca a resposta correta e exibe descrição
-                    st.markdown("### ✅ Resposta revelada")
-                    todos_docs = list(DOCUMENTOS.keys())
-                    chips_html = '<div class="doc-grid">'
-                    for d in sorted(todos_docs):
-                        if d == doc_atual_mgr:
-                            chips_html += f'<div class="doc-chip-correct">🏆 {d} ← CORRETO</div>'
-                        else:
-                            chips_html += f'<div class="doc-chip" style="opacity:0.4">📄 {d}</div>'
-                    chips_html += '</div>'
-                    st.markdown(chips_html, unsafe_allow_html=True)
-
-                    descricao_mgr = info_mgr.get("descricao", "")
-                    if descricao_mgr:
-                        st.markdown(
-                            f'<div style="background:linear-gradient(135deg,#2a1e0a,#3a2a0a);border-left:4px solid #f39c12;'
-                            f'border-radius:10px;padding:14px 18px;margin-top:12px">'
-                            f'<div style="color:#f8c471;font-size:0.85rem;font-weight:bold;margin-bottom:4px">📖 DESCRIÇÃO DO DOCUMENTO</div>'
-                            f'<div style="color:#fdebd0;font-size:0.95rem;line-height:1.5">{descricao_mgr}</div>'
-                            f'</div>',
-                            unsafe_allow_html=True,
-                        )
-
-                st.divider()
-
-                # ── Controles de rodada ──
-                col_c1, col_c2, col_c3 = st.columns(3)
-                with col_c1:
-                    if not gs["rodada_encerrada"] and not gs["fase_preparacao"]:
-                        if st.button("⏩ Encerrar Rodada", use_container_width=True, type="secondary"):
-                            with lock:
-                                gs["rodada_encerrada"] = True
-                                doc = documento_da_rodada(gs)
-                                if doc:
-                                    add_chat(gs, "⏰ Sistema", f"Encerrado pelo gerenciador! Era: {doc}", "sistema")
-                            st.rerun()
-                    elif gs["rodada_encerrada"]:
-                        st.success("✅ Rodada encerrada")
-                with col_c2:
-                    if gs["rodada_encerrada"] and gs["rodada_atual"] <= TOTAL_RODADAS:
-                        if st.button("⏭️ Próxima Rodada", use_container_width=True, type="primary"):
-                            with lock:
-                                avancar_rodada(gs)
-                            st.rerun()
-                with col_c3:
-                    if st.button("🔄 Reiniciar Jogo", use_container_width=True, type="secondary"):
-                        with lock:
-                            iniciar_jogo(gs)
-                        st.rerun()
-
-        st.divider()
-        st.markdown("### 💬 Chat ao Vivo")
-        chat_html_mgr = ""
-        for m in gs["chat"][-50:]:
-            h, a, txt, t = m.get("hora",""), m["autor"], m["msg"], m["tipo"]
-            if t == "acerto":
-                chat_html_mgr += f'<div class="chat-msg-acerto"><span style="opacity:.5">{h}</span> <b>{a}</b>: {txt}</div>'
-            elif t == "sistema":
-                chat_html_mgr += f'<div class="chat-msg-sistema"><span style="opacity:.5">{h}</span> {txt}</div>'
+            st.success(f"O documento desta rodada é: **{doc_atual_mgr}**")
+            
+            if gs["fase_preparacao"]:
+                st.info("🟡 O desenhista está escolhendo os emojis. O quadro aparecerá aqui assim que ele enviar.")
             else:
-                chat_html_mgr += f'<div class="chat-msg-normal"><span style="opacity:.5">{h}</span> <b>{a}</b>: {txt}</div>'
-        st.markdown(
-            f'<div style="height:300px;overflow-y:auto;padding:8px;background:#0e1117;border-radius:10px;border:1px solid #2d3a4f">{chat_html_mgr}</div>',
-            unsafe_allow_html=True,
-        )
-        time.sleep(3)
-        st.rerun()
+                st.markdown("### 🖼️ Quadro de Emojis Atual:")
+                st.markdown(f"<div style='font-size: 40px; text-align: center; background: #1a1a2e; padding: 20px; border-radius: 10px; border: 1px solid #4e9af1;'>{gs['emojis_quadro']}</div>", unsafe_allow_html=True)
+                
+            st.divider()
+            if st.button("🛑 Encerrar Rodada Forçadamente (Mostrar Resposta)"):
+                with lock:
+                    gs["rodada_encerrada"] = True
+                st.rerun()
+                
+            if gs["rodada_encerrada"]:
+                if st.button("⏭️ Ir para Próxima Rodada", type="primary"):
+                    with lock:
+                        avancar_rodada(gs)
+                    st.rerun()
 
 # ═══════════════════════════════════════════════
 # ABA JOGO
 # ═══════════════════════════════════════════════
 elif st.session_state.aba_ativa == "jogo":
+    
     if not st.session_state.ja_no_jogo:
-        st.info("👈 Digite seu apelido na barra lateral e clique em **Entrar na Sala**!")
-        st.markdown("""
-        ### 🎯 Como Jogar
-        - Cada rodada, um jogador vira o **desenhista**: ele tem **30 segundos** para montar um quadro de emojis como dica.
-        - Pode digitar/colar emojis diretamente ou usar a paleta — arraste para posicionar, duplo clique para remover.
-        - Após confirmar (ou o tempo acabar), o quadro fica **congelado** e os outros tentam adivinhar!
-        - **10 pts** para o primeiro a acertar, **5 pts** para os demais.
-        - Dicas textuais são reveladas automaticamente a cada 25 segundos.
-        - São **12 rodadas** — uma por tipo de documento!
-        """)
-
-    elif not gs["jogo_iniciado"] and gs["rodada_atual"] == 0:
-        st.markdown("### 🏠 Sala de Espera")
-        st.info(f"**{len(gs['jogadores'])} jogador(es)** na sala. Aguarde o Gerenciador iniciar o jogo!")
-
-    elif not gs["jogo_iniciado"] and gs["rodada_atual"] > TOTAL_RODADAS:
-        st.markdown("## 🏆 Jogo Encerrado — Ranking Final")
-        medals = ["🥇","🥈","🥉"]
-        for i,(_, d) in enumerate(sorted(gs["jogadores"].items(), key=lambda x:x[1]["pontos"], reverse=True)):
-            m = medals[i] if i < 3 else f"#{i+1}"
-            st.markdown(f'<div class="rank-item" style="font-size:1.2rem;padding:12px"><span>{m} {d["nome"]}</span><span>⭐ {d["pontos"]} pts</span></div>', unsafe_allow_html=True)
-
+        st.info("👈 Digite seu nome na barra lateral para entrar na sala e jogar.")
+        
     else:
-        doc_atual     = documento_da_rodada(gs)
-        info_doc      = DOCUMENTOS.get(doc_atual, {})
-        eh_desenhista = (sid == gs["desenhista_sid"])
-        nome_desenhista = gs["jogadores"].get(gs["desenhista_sid"], {}).get("nome", "?")
-
-        col_jogo, col_chat = st.columns([3, 2], gap="large")
-
-        with col_jogo:
-            st.markdown(f'<div class="rodada-badge">🎮 Rodada {gs["rodada_atual"]}/{TOTAL_RODADAS}</div>', unsafe_allow_html=True)
-
-            # ══════════════════════════════════════════
-            # FASE DE PREPARAÇÃO
-            # ══════════════════════════════════════════
-            if gs["fase_preparacao"]:
-                restante_prep = tempo_restante_prep(gs)
-                tc_prep = "timer-prep urgente" if restante_prep <= 10 else "timer-prep"
-                m_p, s_p = divmod(restante_prep, 60)
-
-                if eh_desenhista:
-                    st.markdown(
-                        f'<div class="prep-tag">🎨 Você é o desenhista! &nbsp;|&nbsp; Documento: <b>{doc_atual}</b><br>'
-                        f'<small>Monte o quadro de emojis nos próximos <b>30 segundos</b> — sem digitar o nome!</small></div>',
-                        unsafe_allow_html=True,
-                    )
-                    st.markdown(f'<div class="{tc_prep}">🎨 Preparação: {m_p:02d}:{s_p:02d}</div>', unsafe_allow_html=True)
-
-                    # Canvas editável para o desenhista
-                    canvas_prep = build_canvas_prep_html(PALETA_EMOJIS)
-                    resultado_prep = components.html(canvas_prep, height=680, scrolling=False)
-
-                    # Captura emojis localmente
-                    if resultado_prep is not None:
-                        try:
-                            parsed = json.loads(resultado_prep) if isinstance(resultado_prep, str) else resultado_prep
-                            if isinstance(parsed, list):
-                                st.session_state["canvas_pendente"] = parsed
-                        except Exception:
-                            pass
-
-                    # Botão de confirmação
-                    if st.button("✅ Confirmar e iniciar rodada!", use_container_width=True, type="primary"):
-                        pendente = st.session_state.get("canvas_pendente", [])
-                        with lock:
-                            iniciar_fase_palpites(gs, pendente)
-                        st.rerun()
-
-                else:
-                    # Outros jogadores aguardam
-                    st.markdown(
-                        f'<div class="watch-prep-tag">⏳ <b>{nome_desenhista}</b> está montando o quadro de emojis...<br>'
-                        f'<small>A rodada começa em breve! Prepare-se para adivinhar.</small></div>',
-                        unsafe_allow_html=True,
-                    )
-                    st.markdown(f'<div class="{tc_prep}">⏳ {m_p:02d}:{s_p:02d}</div>', unsafe_allow_html=True)
-
-                    # Mostra quadro parcial (em construção)
-                    st.markdown("**🖼️ Prévia do quadro sendo montado:**")
-                    canvas_wait = build_canvas_static_html(gs["emojis_quadro"])
-                    components.html(canvas_wait, height=300, scrolling=False)
-
-            # ══════════════════════════════════════════
-            # FASE DE PALPITES
-            # ══════════════════════════════════════════
-            else:
-                if eh_desenhista:
-                    st.markdown(f'<div class="des-tag">🎨 Você montou o quadro! &nbsp;|&nbsp; Aguarde os outros adivinharem...<br><small>Documento: <b>{doc_atual}</b></small></div>', unsafe_allow_html=True)
-                else:
-                    st.markdown(f'<div class="watch-tag">🖼️ Analise o quadro de emojis de <b>{nome_desenhista}</b> e adivinhe o documento!</div>', unsafe_allow_html=True)
-
-                # Descrição ao encerrar rodada
-                if gs["rodada_encerrada"] and doc_atual:
-                    descricao_doc = info_doc.get("descricao", "")
-                    if descricao_doc:
-                        st.markdown(
-                            f'<div class="dica-card" style="border-left-color:#f39c12;background:linear-gradient(135deg,#2a1e0a,#3a2a0a);margin-bottom:10px">'
-                            f'<b>📖 Sobre este documento:</b><br>{descricao_doc}</div>',
-                            unsafe_allow_html=True,
-                        )
-
-                # Cronômetro
-                restante = tempo_restante(gs)
-                tc = "timer-box urgente" if restante <= 15 else "timer-box"
-                mins, secs = divmod(restante, 60)
-                st.markdown(f'<div class="{tc}">⏱️ {mins:02d}:{secs:02d}</div>', unsafe_allow_html=True)
-
-                # Quadro estático (congelado para todos)
-                canvas_static = build_canvas_static_html(gs["emojis_quadro"])
-                components.html(canvas_static, height=340, scrolling=False)
-
-                # Dicas textuais
-                st.markdown(f"**💡 Dicas textuais: {gs['dicas_liberadas']}/4**")
-                dicas = info_doc.get("dicas", [])
-                for i, dica in enumerate(dicas):
-                    if i < gs["dicas_liberadas"]:
-                        st.markdown(f'<div class="dica-card">📌 Dica {i+1}: {dica}</div>', unsafe_allow_html=True)
-                    else:
-                        st.markdown(f'<div class="dica-card" style="opacity:.2;filter:blur(3px)">📌 Dica {i+1}: ???</div>', unsafe_allow_html=True)
-
-                if gs["rodada_encerrada"]:
-                    st.success(f"📄 O documento era: **{doc_atual}**")
-
-                # Campo de palpite
-                st.markdown("---")
-                if not eh_desenhista and not gs["rodada_encerrada"]:
-                    if sid in gs["acertaram"]:
-                        st.success("✅ Você acertou! Aguarde os outros jogadores.")
-                    else:
-                        with st.form("form_palpite", clear_on_submit=True):
-                            palpite = st.text_input("🎯 Seu palpite:", placeholder="Nome do documento...", max_chars=50, label_visibility="collapsed")
-                            enviado = st.form_submit_button("📨 Enviar Palpite", use_container_width=True)
-                        if enviado and palpite.strip():
-                            nome_jog = st.session_state.nome_jogador
-                            with lock:
-                                if normalizar(palpite) == normalizar(doc_atual):
-                                    pts = 10 if not gs["acertaram"] else 5
-                                    gs["jogadores"][sid]["pontos"] += pts
-                                    gs["acertaram"].append(sid)
-                                    add_chat(gs, nome_jog, f"🎉 ACERTOU e ganhou {pts} pts!", "acerto")
-                                else:
-                                    add_chat(gs, nome_jog, palpite, "normal")
-                            st.rerun()
-                elif gs["rodada_encerrada"]:
-                    st.info("⏳ Rodada encerrada. Aguarde o Gerenciador avançar para a próxima rodada.")
-                elif eh_desenhista:
-                    st.info("🎨 Você montou o quadro — aguarde os outros adivinharem!")
-
-        # ── CHAT + PLACAR ──
-        with col_chat:
-            st.markdown("### 💬 Chat da Rodada")
-            chat_html = ""
-            for m in gs["chat"][-35:]:
-                h, a, txt, t = m.get("hora",""), m["autor"], m["msg"], m["tipo"]
-                if t == "acerto":
-                    chat_html += f'<div class="chat-msg-acerto"><span style="opacity:.5">{h}</span> <b>{a}</b>: {txt}</div>'
-                elif t == "sistema":
-                    chat_html += f'<div class="chat-msg-sistema"><span style="opacity:.5">{h}</span> {txt}</div>'
-                else:
-                    chat_html += f'<div class="chat-msg-normal"><span style="opacity:.5">{h}</span> <b>{a}</b>: {txt}</div>'
-            st.markdown(
-                f'<div style="height:380px;overflow-y:auto;padding:8px;background:#0e1117;border-radius:10px;border:1px solid #2d3a4f">{chat_html}</div>',
-                unsafe_allow_html=True,
-            )
-
-            st.markdown("### 📊 Placar")
-            medals = ["🥇","🥈","🥉"]
-            for i,(s, d) in enumerate(sorted(gs["jogadores"].items(), key=lambda x:x[1]["pontos"], reverse=True)[:6]):
-                m = medals[i] if i < 3 else f"#{i+1}"
-                icon = " 🎨" if s == gs["desenhista_sid"] else ""
-                st.markdown(f'<div class="rank-item"><span>{m} {d["nome"]}{icon}</span><span>⭐ {d["pontos"]}</span></div>', unsafe_allow_html=True)
-
-# ─────────────────────────────────────────────
-# AUTO-REFRESH
-# ─────────────────────────────────────────────
-if st.session_state.aba_ativa == "jogo" and st.session_state.ja_no_jogo:
-    if gs["jogo_iniciado"]:
-        if gs["fase_preparacao"]:
-            # Refresh mais rápido durante preparação para atualizar timer
-            if not (sid == gs["desenhista_sid"]):
-                time.sleep(2)
-                st.rerun()
-        elif not gs["rodada_encerrada"]:
-            time.sleep(2)
-            st.rerun()
+        if not gs["jogo_iniciado"]:
+            st.info("⏳ Aguardando o gerenciador iniciar a partida...")
+            
         else:
-            time.sleep(4)
-            st.rerun()
+            # Layout principal: Esquerda = Quadro/Dicas, Direita = Chat
+            col_game, col_chat = st.columns([6, 4])
+            
+            with col_game:
+                st.markdown(f"### 🚀 Rodada {gs['rodada_atual']} / {TOTAL_RODADAS}")
+                
+                # --- TELA DO DESENHISTA (FASE PREPARAÇÃO) ---
+                if gs["fase_preparacao"]:
+                    if sid == gs["desenhista_sid"]:
+                        doc_atual = documento_da_rodada(gs)
+                        tempo_prep = tempo_restante_prep(gs)
+                        
+                        st.markdown(f"<div class='timer-prep'>⏳ Sua vez! Tempo para preparar: {tempo_prep}s</div>", unsafe_allow_html=True)
+                        st.warning(f"O documento que você deve representar é: **{doc_atual}**")
+                        
+                        emojis_input = st.text_input("📝 Cole ou digite os emojis aqui (Ex: 📄✍️🧑‍⚖️):", key="input_des")
+                        
+                        if st.button("✅ Enviar Emojis e Iniciar Rodada", use_container_width=True, type="primary"):
+                            with lock:
+                                iniciar_fase_palpites(gs, emojis_input)
+                            st.rerun()
+                    else:
+                        st.info("🟡 Aguardando o desenhista montar o quadro de emojis...")
+                        
+                # --- TELA DE TODOS (FASE PALPITES) ---
+                else:
+                    if not gs["rodada_encerrada"]:
+                        st.markdown(f"<div class='timer-box'>⏳ Tempo: {tempo_restante(gs)}s</div>", unsafe_allow_html=True)
+                        
+                    st.markdown("### 🖼️ Quadro de Dicas:")
+                    st.markdown(f"<div style='font-size: 50px; text-align: center; background: #1e2a3a; padding: 30px; border-radius: 12px; border: 2px solid #4e9af1; min-height: 120px;'>{gs['emojis_quadro']}</div>", unsafe_allow_html=True)
+                    
+                    if gs["rodada_encerrada"]:
+                        st.success(f"🏆 O documento correto era: **{documento_da_rodada(gs)}**")
+                        if sid == gs.get("desenhista_sid") or len(gs["jogadores"]) <= 1:
+                            st.info("Aguardando o gerenciador iniciar a próxima rodada...")
+            
+            with col_chat:
+                st.markdown("### 💬 Palpites e Chat")
+                chat_container = st.container(height=400)
+                
+                with chat_container:
+                    for msg in gs["chat"]:
+                        if msg["tipo"] == "sistema":
+                            st.markdown(f"<div class='chat-msg-sistema'>[{msg['hora']}] {msg['msg']}</div>", unsafe_allow_html=True)
+                        elif msg["tipo"] == "acerto":
+                            st.markdown(f"<div class='chat-msg-acerto'>[{msg['hora']}] {msg['msg']}</div>", unsafe_allow_html=True)
+                        else:
+                            st.markdown(f"<div class='chat-msg-normal'>[{msg['hora']}] <b>{msg['autor']}</b>: {msg['msg']}</div>", unsafe_allow_html=True)
+                
+                # Sistema de Input para Jogadores
+                if not gs["fase_preparacao"] and not gs["rodada_encerrada"]:
+                    if sid == gs["desenhista_sid"]:
+                        st.info("🎨 Você é o desenhista. Acompanhe os palpites!")
+                    elif sid in gs["acertaram"]:
+                        st.success("✅ Você já acertou! Aguarde a rodada acabar.")
+                        # Permite conversar sem pontuar de novo
+                        chat_livre = st.chat_input("Converse com os outros (sua resposta está oculta)...")
+                        if chat_livre:
+                            with lock:
+                                add_chat(gs, st.session_state.nome_jogador, chat_livre, "normal")
+                            st.rerun()
+                    else:
+                        palpite = st.chat_input("Digite seu palpite aqui...")
+                        if palpite:
+                            palpite = palpite.strip()
+                            if palpite:
+                                doc_correto = documento_da_rodada(gs)
+                                # Verifica acerto ignorando maiúsculas e acentos
+                                if normalizar(palpite) == normalizar(doc_correto):
+                                    with lock:
+                                        gs["acertaram"].append(sid)
+                                        pontos = max(1, 10 - len(gs["acertaram"]) * 2)
+                                        gs["jogadores"][sid]["pontos"] += pontos
+                                        
+                                        # Dá ponto pro desenhista se alguém acerta
+                                        if gs["desenhista_sid"] in gs["jogadores"]:
+                                            gs["jogadores"][gs["desenhista_sid"]]["pontos"] += 1
+                                            
+                                        add_chat(gs, st.session_state.nome_jogador, f"{st.session_state.nome_jogador} ACERTOU! 🎉 (+{pontos} pts)", "acerto")
+                                        
+                                        # Encerra se todos que podiam acertar acertaram
+                                        total_adivinhadores = len(gs["jogadores"]) - 1
+                                        if total_adivinhadores > 0 and len(gs["acertaram"]) >= total_adivinhadores:
+                                            gs["rodada_encerrada"] = True
+                                    st.rerun()
+                                else:
+                                    with lock:
+                                        add_chat(gs, st.session_state.nome_jogador, palpite, "normal")
+                                    st.rerun()
